@@ -16,6 +16,8 @@ import (
   "flag"
 )
 
+const EVENT_BUFFER_SIZE = 1024
+
 var WALDO_FILENAME string
 var SPOOL_DIR string
 var FILE_PATTERN string
@@ -42,14 +44,6 @@ func (parser *Unified2FormatParser) ReadPacket() (*Unified2_Packet, error) {
         packet.Type = serialized_packet.Type
         packet.Length = serialized_packet.Length
         
-        //fmt.Println("packet.Type:", packet.Type)
-        //fmt.Println("packet.Length:", packet.Length)
-        /*
-        if err := binary.Read(parser, binary.BigEndian, &packet.Length); err != nil {
-                return &packet, err
-        }
-        fmt.Println("packet.Length:", packet.Length)
-        */
         packet.Data = make([]byte, packet.Length)
 
         if _, err := io.ReadFull(parser, packet.Data); err != nil {
@@ -104,17 +98,23 @@ func producer(files []string, waldo Waldo ,w io.Writer, waldoFile string, finalO
         return nil
 }
 
-func consumer(r io.Reader, finalOut io.Writer, waldoFile string, lastKnownPosition int64, currentFilename string) error {
+func consumer(r io.ReadSeeker, finalOut io.Writer, waldoFile string, lastKnownPosition int64, currentFilename string) error {
 	//r io.Reader
         parser := NewUnified2FormatParser(r)
         var lastKnownEvent = new (SnortEventIpv4AppId)
         
         //packetCounter := 0
-        queue := NewQueue()
+        eventOut := func(e *SnortEventIpv4AppId) {
+        	//log.Println("[INFO] Pop event ",e.Event_id," at back")
+        	DumpJson(e, finalOut)
+        }
+        
+        queue := NewQueue(EVENT_BUFFER_SIZE, eventOut)
 
         for {
                 packet, err := parser.ReadPacket()
-                lastKnownPosition = lastKnownPosition + int64(packet.Length) + 8
+                lastKnownPosition,_ = r.Seek(0,1)
+                //lastKnownPosition = lastKnownPosition + int64(packet.Length) + 8
                 if err != nil && err != io.EOF {
                         log.Println("[ERR parsing]", err)
                         return err
@@ -127,14 +127,9 @@ func consumer(r io.Reader, finalOut io.Writer, waldoFile string, lastKnownPositi
                 //dumpHex(packet.Data, 0, 16)
                 switch packet.Type {
                   case UNIFIED2_IDS_EVENT_APPID:
-                    if lastKnownEvent.Event_id != 0 {
-                      // submit to process & mark waldo file
-                      //DumpJson(lastKnownEvent, finalOut)
-                      // reset lastKnownEvent & lastKnowPos
-                    }
-                    lastKnownPosition = lastKnownPosition - int64(packet.Length) - 8
+                    //lastKnownPosition = lastKnownPosition - int64(packet.Length) - 8
                     lastKnownEvent = new (SnortEventIpv4AppId)
-                      //log.Println("Loc:", lastKnownPosition)
+                      log.Println("Loc:", lastKnownPosition)
                     waldo := Waldo{currentFilename,lastKnownPosition}
                     WriteWaldo(waldoFile, waldo)
                       /*
@@ -144,33 +139,32 @@ func consumer(r io.Reader, finalOut io.Writer, waldoFile string, lastKnownPositi
                       }
                       */
                     event:= DecodeU2EventApp(packet.Data)
-                    //DumpJson(event)
-                    //fmt.Println("")
                     lastKnownEvent.Unified2IDSEventAppId = *event
                     queue.Push(lastKnownEvent)
                   case UNIFIED2_EXTRA_DATA:
                     extra:=DecodeU2ExtraData(packet.Data)
-                    //DumpJson(extra)
-                    //dumpHex(packet.Data,0,len(packet.Data))
                     event := queue.AttachExtraData(extra)
                     if event == nil {
                     	log.Println("[WARN]: orphan extra event_id=", extra.Event_id)
+                    	buf:=new (bytes.Buffer)
+                    	DumpJson(extra,buf)
+                    	log.Println("[WARN] ",buf.String())
                     }
                   case UNIFIED2_PACKET:
                     rawPacket:= DecodeU2Packet(packet.Data)
-                    //DumpJson(raw_packet)
-                    //log.Println("Found packet:", raw_packet.Event_id)
                     event:=queue.AttachPacket(rawPacket)
                     if event == nil {
                       log.Println("[WARN]: orphan packet event_id=", rawPacket.Event_id)
-                      continue
+                    	buf:=new (bytes.Buffer)
+                    	DumpJson(rawPacket,buf)
+                    	log.Println("[WARN] ",buf.String())
                     }
 
                   default:
                     log.Println("[WARN]: packet unknown type=", packet.Type)
                 }
         }
-        log.Println("[INFO] Total event found: ", queue.List.Len())
+        log.Println("[INFO] Total remaining event found: ", queue.List.Len())
         queue.Dump(finalOut)
         return nil
 }
@@ -414,7 +408,10 @@ func main() {
         if err = producer(files, waldo, nil, WALDO_FILENAME, finalOut); err != nil {
                 fmt.Println(err)
         }
-
+        if fl, ok := finalOut.(*bufio.Writer); ok {
+            fl.Flush()
+        }
+        f.Close()
         //pipeWriter.Close()
         //pipeReader.Close()
         //time.Sleep(1 * time.Second)
