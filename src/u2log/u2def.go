@@ -237,3 +237,4 @@ type Waldo struct {
 }
 
 type U2FileConsumer func(io.Reader, io.Writer, string) error
+

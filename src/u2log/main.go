@@ -109,16 +109,17 @@ func consumer(r io.Reader, finalOut io.Writer, waldoFile string, lastKnownPositi
         parser := NewUnified2FormatParser(r)
         var lastKnownEvent = new (SnortEventIpv4AppId)
         
-        packetCounter := 0
+        //packetCounter := 0
+        queue := NewQueue()
 
         for {
                 packet, err := parser.ReadPacket()
                 lastKnownPosition = lastKnownPosition + int64(packet.Length) + 8
                 if err != nil && err != io.EOF {
-                        fmt.Println("[ERR parsing]", err)
+                        log.Println("[ERR parsing]", err)
                         return err
                 }
-                fmt.Printf("Success! (id:%X, len:%d)\n", packet.Type,len(packet.Data))
+                //log.Printf("Success! (id:%X, len:%d)\n", packet.Type,len(packet.Data))
                 if err == io.EOF {
                 	break
                 }
@@ -128,62 +129,49 @@ func consumer(r io.Reader, finalOut io.Writer, waldoFile string, lastKnownPositi
                   case UNIFIED2_IDS_EVENT_APPID:
                     if lastKnownEvent.Event_id != 0 {
                       // submit to process & mark waldo file
-                      DumpJson(lastKnownEvent, finalOut)
+                      //DumpJson(lastKnownEvent, finalOut)
                       // reset lastKnownEvent & lastKnowPos
-                      lastKnownPosition = lastKnownPosition - int64(packet.Length) - 8
-                      lastKnownEvent = new (SnortEventIpv4AppId)
-                      fmt.Println("Loc:", lastKnownPosition)
-                      
-                      waldo := Waldo{currentFilename,lastKnownPosition}
-                      WriteWaldo(waldoFile, waldo)
-                      
+                    }
+                    lastKnownPosition = lastKnownPosition - int64(packet.Length) - 8
+                    lastKnownEvent = new (SnortEventIpv4AppId)
+                      //log.Println("Loc:", lastKnownPosition)
+                    waldo := Waldo{currentFilename,lastKnownPosition}
+                    WriteWaldo(waldoFile, waldo)
+                      /*
                       packetCounter = packetCounter + 1
                       if packetCounter == 1 {
                       	return nil
                       }
-                    }
+                      */
                     event:= DecodeU2EventApp(packet.Data)
                     //DumpJson(event)
                     //fmt.Println("")
                     lastKnownEvent.Unified2IDSEventAppId = *event
+                    queue.Push(lastKnownEvent)
                   case UNIFIED2_EXTRA_DATA:
                     extra:=DecodeU2ExtraData(packet.Data)
                     //DumpJson(extra)
                     //dumpHex(packet.Data,0,len(packet.Data))
-                    if extra.Event_id != lastKnownEvent.Event_id {
-                      fmt.Println("[WARN]: orphan extra event_id=", extra.Event_id,",expected:", lastKnownEvent.Event_id)
-                      continue
-                    }
-                    if lastKnownEvent.ExtraData == nil {
-                      lastKnownEvent.ExtraData = make([]Unified2ExtraData,1)
-                      lastKnownEvent.ExtraData[0] = *extra
-                    } else {
-                      lastKnownEvent.ExtraData = append(lastKnownEvent.ExtraData, *extra)
+                    event := queue.AttachExtraData(extra)
+                    if event == nil {
+                    	log.Println("[WARN]: orphan extra event_id=", extra.Event_id)
                     }
                   case UNIFIED2_PACKET:
-                    raw_packet:= DecodeU2Packet(packet.Data)
+                    rawPacket:= DecodeU2Packet(packet.Data)
                     //DumpJson(raw_packet)
-                    //fmt.Println("Found packet:", raw_packet.Event_id)
-                    if raw_packet.Event_id != lastKnownEvent.Event_id {
-                      fmt.Println("[WARN]: orphan packet event_id=", raw_packet.Event_id,",expected:", lastKnownEvent.Event_id)
+                    //log.Println("Found packet:", raw_packet.Event_id)
+                    event:=queue.AttachPacket(rawPacket)
+                    if event == nil {
+                      log.Println("[WARN]: orphan packet event_id=", rawPacket.Event_id)
                       continue
-                    }
-                    if lastKnownEvent.Packets == nil {
-                      lastKnownEvent.Packets = make([]RawPacket,1)
-                      lastKnownEvent.Packets[0] = *raw_packet
-                    } else {
-                      lastKnownEvent.Packets = append(lastKnownEvent.Packets, *raw_packet)
                     }
 
                   default:
-                    fmt.Println("[WARN]: packet unknown type=", packet.Type)
+                    log.Println("[WARN]: packet unknown type=", packet.Type)
                 }
         }
-        if lastKnownEvent.Event_id != 0 {
-          // submit to process
-          DumpJson(lastKnownEvent, finalOut)
-          fmt.Println("Loc:", lastKnownPosition)
-        }
+        log.Println("[INFO] Total event found: ", queue.List.Len())
+        queue.Dump(finalOut)
         return nil
 }
 
@@ -270,7 +258,7 @@ func DecodeU2ExtraData (buf []byte) *Unified2ExtraData {
   e.Data = make([]byte, e.Blob_length-8)
 
   if n,err := io.ReadFull(r, e.Data) ; err != nil && err != io.EOF {
-    fmt.Println("[ERR] read extra data:",err, "expected len:",e.Blob_length-8, ",got:",n)
+    log.Println("[ERR] read extra data:",err, "expected len:",e.Blob_length-8, ",got:",n)
     return e
   }
   
@@ -299,7 +287,7 @@ func DecodeU2Packet(buf []byte) *RawPacket {
   p.Data = make([]byte, packet_data_size)
   
   if n,err := io.ReadFull(r, p.Data) ; err != nil && err != io.EOF {
-    fmt.Println("[ERR] read packet data:",err, "expected len:",packet_data_size, ",got:",n)
+    log.Println("[ERR] read packet data:",err, "expected len:",packet_data_size, ",got:",n)
     return p
   }
   
@@ -317,28 +305,28 @@ func stringInSlice(a string, list []string) bool {
 
 func checkWaldo(filename string, files []string) error {
     if _, err := os.Stat(filename); os.IsNotExist(err) {
-          fmt.Println("No waldo file:",filename,", will process from beginning")
+          log.Println("No waldo file:",filename,", will process from beginning")
           return os.ErrNotExist 
     } else {
-          fmt.Println("Found waldo file, try loading...")
+          log.Println("Found waldo file, try loading...")
           w:=ReadWaldo(filename)
           if w.Filename=="" {
-            fmt.Println("Loading waldo file error")
+            log.Println("Loading waldo file error")
             return os.ErrInvalid
           } else {
             if !stringInSlice(w.Filename, files) {
-              fmt.Println("Incorrect waldo data: Waldo point to file not in glob pattern")
-              fmt.Println(w.Filename, " not in ", files)
+              log.Println("Incorrect waldo data: Waldo point to file not in glob pattern")
+              log.Println(w.Filename, " not in ", files)
               return os.ErrInvalid
             }
             fi,err := os.Stat(w.Filename)
             if err != nil {
-              fmt.Println(err)
+              log.Println(err)
               return os.ErrInvalid
             }
             if w.Location >= fi.Size() {
-              fmt.Println("Incorrect waldo data: location >= file size")
-              fmt.Println("marked location:", w.Location, ",file size:", fi.Size())
+              log.Println("Incorrect waldo data: location >= file size")
+              log.Println("marked location:", w.Location, ",file size:", fi.Size())
               return os.ErrInvalid
             }
           }
@@ -357,23 +345,6 @@ func initConfig() {
     flag.PrintDefaults()
     os.Exit(1)
   }
-
-    if FILE_PATTERN=="-" || WALDO_FILENAME=="-" {
-      //flag.PrintDefaults()
-      log.Fatal("Must provide correct waldo file & file name pattern")
-    } else {
-      fmt.Println("Spooling mode, checking params")
-      files, err := filepath.Glob(FILE_PATTERN)
-      if err != nil {
-                fmt.Println("Glob pattern error:",err)
-                os.Exit(-1)
-      }
-      err = checkWaldo(WALDO_FILENAME, files)
-      if err != nil && err != os.ErrNotExist {
-      	os.Exit(-1)
-      }
-    }
-  
   if (LOG_FILE != "-") {
     log.Println("Log will be output to ", LOG_FILE)
     lf, err := os.OpenFile(LOG_FILE, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
@@ -384,6 +355,23 @@ func initConfig() {
   } else {
     fmt.Println("Log will be output to console")
   }
+
+    if FILE_PATTERN=="-" || WALDO_FILENAME=="-" {
+      //flag.PrintDefaults()
+      log.Fatal("Must provide correct waldo file & file name pattern")
+    } else {
+      log.Println("Spooling mode, checking params")
+      files, err := filepath.Glob(FILE_PATTERN)
+      if err != nil {
+                log.Println("Glob pattern error:",err)
+                os.Exit(-1)
+      }
+      err = checkWaldo(WALDO_FILENAME, files)
+      if err != nil && err != os.ErrNotExist {
+      	os.Exit(-1)
+      }
+    }
+  
 }
 
 func check(e error) {
