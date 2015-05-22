@@ -318,7 +318,7 @@ func checkWaldo(filename string, files []string) error {
               log.Println(err)
               return os.ErrInvalid
             }
-            if w.Location >= fi.Size() {
+            if w.Location > fi.Size() {
               log.Println("Incorrect waldo data: location >= file size")
               log.Println("marked location:", w.Location, ",file size:", fi.Size())
               return os.ErrInvalid
