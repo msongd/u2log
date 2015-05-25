@@ -28,7 +28,7 @@ var operationMode int = -1
 
 func NewUnified2FormatParser(r io.Reader) *Unified2FormatParser {
         return &Unified2FormatParser{
-                Reader: bufio.NewReader(r),
+                Reader: &r,
         }
 }
 
@@ -36,7 +36,7 @@ func (parser *Unified2FormatParser) ReadPacket() (*Unified2_Packet, error) {
         serialized_packet := Serial_Unified2_Header{}
         packet := Unified2_Packet{}
 
-        if err := binary.Read(parser, binary.BigEndian, &serialized_packet); err != nil {
+        if err := binary.Read(*parser.Reader, binary.BigEndian, &serialized_packet); err != nil {
                 packet.Type = serialized_packet.Type
                 packet.Length = serialized_packet.Length
                 return &packet, err
@@ -46,7 +46,7 @@ func (parser *Unified2FormatParser) ReadPacket() (*Unified2_Packet, error) {
         
         packet.Data = make([]byte, packet.Length)
 
-        if _, err := io.ReadFull(parser, packet.Data); err != nil {
+        if _, err := io.ReadFull(*parser.Reader, packet.Data); err != nil {
                 return &packet, err
         }
 

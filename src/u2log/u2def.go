@@ -1,7 +1,7 @@
 package main
 import (
 	"io"
-        "bufio"
+//        "bufio"
 )
 
 const OP_MODE_SINGLE = 0
@@ -213,7 +213,7 @@ type Serial_Unified2AppStat struct {
 }
 
 type Unified2FormatParser struct {
-        *bufio.Reader
+     Reader   *io.Reader
 }
 
 type Unified2ExtraData struct {
