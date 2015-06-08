@@ -228,6 +228,41 @@ type SnortEventIpv4AppId struct {
   ExtraData []Unified2ExtraData
 }
 
+type PrettyUnified2ExtraData struct {
+        Sensor_id    uint32
+        Event_id     uint32
+        Second uint32
+        Type         uint32 /* EventInfo */
+        Data_type    uint32 /*EventDataType */
+  		Data string
+}
+
+type PrettySnortEventIpv4AppId struct {
+        Sensor_id          uint32
+        Event_id           uint32
+        Second       uint32
+        Microsecond  uint32
+        Sig_id       uint32
+        Gen_id       uint32
+        Sig_rev uint32
+        Cls_id  uint32
+        Pri_id        uint32
+        Ip_src     string
+        Ip_dst     string
+        Sport        uint16
+        Dport        uint16
+        Proto           uint8
+        Impact_flag        uint8 //overloads packet_action
+        Impact             uint8
+        Blocked            uint8
+        Mpls_label         uint32
+        VlanId             uint16
+        Pad2               uint16 //Policy ID
+        App           string
+  Packets []RawPacket
+  ExtraData []PrettyUnified2ExtraData
+}
+
 type SnortEventIpv6AppId struct {
 }
 

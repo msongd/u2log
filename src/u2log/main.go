@@ -14,6 +14,8 @@ import (
   "bytes"
   "log"
   "flag"
+  "net"
+  "strings"
 )
 
 const EVENT_BUFFER_SIZE = 1024
@@ -106,7 +108,7 @@ func consumer(r io.ReadSeeker, finalOut io.Writer, waldoFile string, lastKnownPo
         //packetCounter := 0
         eventOut := func(e *SnortEventIpv4AppId) {
         	//log.Println("[INFO] Pop event ",e.Event_id," at back")
-        	DumpJson(e, finalOut)
+        	DumpJson(e.Translate(),finalOut)
         }
         
         queue := NewQueue(EVENT_BUFFER_SIZE, eventOut)
@@ -129,7 +131,7 @@ func consumer(r io.ReadSeeker, finalOut io.Writer, waldoFile string, lastKnownPo
                   case UNIFIED2_IDS_EVENT_APPID:
                     //lastKnownPosition = lastKnownPosition - int64(packet.Length) - 8
                     lastKnownEvent = new (SnortEventIpv4AppId)
-                      log.Println("Loc:", lastKnownPosition)
+                    //log.Println("Loc:", lastKnownPosition)
                     waldo := Waldo{currentFilename,lastKnownPosition}
                     WriteWaldo(waldoFile, waldo)
                       /*
@@ -367,6 +369,51 @@ func initConfig() {
     }
   
 }
+
+func (source *SnortEventIpv4AppId) Translate() (*PrettySnortEventIpv4AppId) {
+	dst := &PrettySnortEventIpv4AppId{}
+
+	dst.Sensor_id = source.Sensor_id
+    dst.Event_id  = source.Event_id
+    dst.Second    = source.Event_second
+    dst.Microsecond  = source.Event_microsecond
+    dst.Sig_id       = source.Signature_id
+    dst.Gen_id      = source.Generator_id
+    dst.Sig_rev = source.Signature_revision
+    dst.Cls_id  = source.Classification_id
+    dst.Pri_id  = source.Priority_id
+    dst.Ip_src = net.IPv4(source.Ip_source[0],source.Ip_source[1],source.Ip_source[2],source.Ip_source[3]).String()
+    dst.Ip_dst = net.IPv4(source.Ip_destination[0],source.Ip_destination[1],source.Ip_destination[2],source.Ip_destination[3]).String()
+    dst.Sport  = source.Sport_itype
+    dst.Dport  = source.Dport_icode
+    dst.Proto  = source.Protocol
+    dst.Impact_flag = source.Impact_flag
+    dst.Impact      = source.Impact
+    dst.Blocked     = source.Blocked
+    dst.Mpls_label  = source.Mpls_label
+    dst.VlanId      = source.VlanId
+    dst.Pad2        = source.Pad2
+    dst.App  = strings.TrimRight(string(source.App_name[:]),"\x00")
+	
+	if len(source.Packets) > 0 {
+		dst.Packets = make([]RawPacket, len(source.Packets))
+		copy(dst.Packets, source.Packets)
+	}
+	len_extra :=len(source.ExtraData) 
+	if len_extra > 0 {
+		dst.ExtraData = make([]PrettyUnified2ExtraData, len_extra)
+		for i:=0; i< len_extra; i++ {
+			dst.ExtraData[i].Sensor_id = source.ExtraData[i].Sensor_id
+	        dst.ExtraData[i].Event_id  = source.ExtraData[i].Event_id
+	        dst.ExtraData[i].Second = source.ExtraData[i].Event_second
+	        dst.ExtraData[i].Type   = source.ExtraData[i].Type
+	        dst.ExtraData[i].Data_type  = source.ExtraData[i].Data_type
+	  		dst.ExtraData[i].Data = strings.TrimRight(string(source.ExtraData[i].Data),"\x00")
+		}
+	}
+	
+	return dst
+} 
 
 func check(e error) {
     if e != nil {

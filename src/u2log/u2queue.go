@@ -84,6 +84,6 @@ func (q *U2EventQueue) AttachPacket(packet *RawPacket) *SnortEventIpv4AppId {
 
 func (q *U2EventQueue) Dump(finalOut io.Writer) {
     for e:= q.List.Back(); e!= nil; e = e.Prev() {
-    	DumpJson(e.Value.(*SnortEventIpv4AppId), finalOut)
+    	DumpJson(e.Value.(*SnortEventIpv4AppId).Translate(), finalOut)
     }
 }
